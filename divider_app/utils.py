@@ -1,143 +1,131 @@
+import os
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
 import arff
+from sklearn.model_selection import train_test_split
 
 
-# =============================
-# 🔍 Validación del archivo
-# =============================
-def validate_file_extension(filename):
+# ─────────────────────────────────────────────
+# VALIDACIÓN DE ARCHIVOS
+# ─────────────────────────────────────────────
+def validate_file_extension(filename: str) -> bool:
     """Valida que el archivo tenga extensión .arff"""
     return filename.lower().endswith('.arff')
 
 
-# =============================
-# 📖 Lectura del dataset ARFF
-# =============================
+# ─────────────────────────────────────────────
+# LECTURA DEL DATASET ARFF
+# ─────────────────────────────────────────────
 def read_arff_dataset(file):
-    """Lee un archivo ARFF y lo convierte en un DataFrame de pandas"""
+    """
+    Lee un archivo ARFF y lo convierte a DataFrame de pandas.
+    Acepta archivos subidos desde un formulario de Django (InMemoryUploadedFile).
+    """
     try:
-        content = file.read().decode('utf-8')
+        # Asegurar que el puntero del archivo está al inicio
+        file.seek(0)
+        content = file.read().decode('utf-8', errors='ignore')
+
         dataset = arff.loads(content)
         attributes = [attr[0] for attr in dataset['attributes']]
-        df = pd.DataFrame(dataset['data'], columns=attributes)
+        data = dataset['data']
+
+        df = pd.DataFrame(data, columns=attributes)
         return df
+
     except Exception as e:
         raise ValueError(f"Error al leer el archivo ARFF: {str(e)}")
 
 
-# =============================
-# ✂️ División del dataset
-# =============================
+# ─────────────────────────────────────────────
+# DIVISIÓN DEL DATASET
+# ─────────────────────────────────────────────
 def train_val_test_split(df, rstate=42, shuffle=True, stratify=None):
     """
     Divide el dataset en train (60%), validation (20%) y test (20%).
-    Si la columna de estratificación no es válida, se hace división aleatoria.
+    Si 'stratify' es una columna, se realiza muestreo estratificado.
     """
-    strat = None
-    if stratify and stratify in df.columns:
-        try:
-            # Evita error si la columna tiene un solo valor o valores nulos
-            if df[stratify].nunique() > 1:
-                strat = df[stratify]
-        except Exception:
-            strat = None
+    try:
+        strat = df[stratify] if stratify else None
 
-    train_set, test_set = train_test_split(
-        df, test_size=0.4, random_state=rstate, shuffle=shuffle, stratify=strat
-    )
+        train_set, temp_set = train_test_split(
+            df, test_size=0.4, random_state=rstate, shuffle=shuffle, stratify=strat
+        )
 
-    strat = None
-    if stratify and stratify in test_set.columns:
-        try:
-            if test_set[stratify].nunique() > 1:
-                strat = test_set[stratify]
-        except Exception:
-            strat = None
+        strat_temp = temp_set[stratify] if stratify else None
+        val_set, test_set = train_test_split(
+            temp_set, test_size=0.5, random_state=rstate, shuffle=shuffle, stratify=strat_temp
+        )
 
-    val_set, test_set = train_test_split(
-        test_set, test_size=0.5, random_state=rstate, shuffle=shuffle, stratify=strat
-    )
+        return train_set, val_set, test_set
 
-    return (train_set, val_set, test_set)
+    except Exception as e:
+        raise ValueError(f"Error al dividir el dataset: {str(e)}")
 
 
-# =============================
-# 🧮 Conversión a ARFF
-# =============================
+# ─────────────────────────────────────────────
+# CONVERSIÓN A ARFF
+# ─────────────────────────────────────────────
 def convert_to_arff(df, relation_name="dataset"):
-    """
-    Convierte un DataFrame de pandas en texto ARFF válido.
-    Maneja valores nulos, cadenas con comillas y columnas mixtas.
-    """
-    import pandas as pd
-    import numpy as np
+    """Convierte un DataFrame a formato ARFF válido."""
+    attributes = []
 
-    arff_str = f"@RELATION {relation_name}\n\n"
-
-    # --- Atributos ---
-    for col in df.columns:
-        dtype = df[col].dtype
-
-        if pd.api.types.is_numeric_dtype(dtype):
-            attr_type = "NUMERIC"
-        elif pd.api.types.is_bool_dtype(dtype):
-            attr_type = "{True, False}"
+    for col_name, dtype in df.dtypes.items():
+        if np.issubdtype(dtype, np.number):
+            attributes.append((col_name, 'NUMERIC'))
         else:
-            unique_vals = df[col].dropna().unique()
-            if len(unique_vals) > 0 and len(unique_vals) <= 20:
-                clean_vals = [
-                    str(v).replace(',', '').replace(' ', '_').replace('"', "'")
-                    for v in unique_vals
-                ]
-                attr_type = "{" + ",".join(clean_vals) + "}"
+            unique_vals = df[col_name].dropna().unique()
+            # Si tiene muchos valores distintos, se trata como cadena
+            if len(unique_vals) > 20:
+                attributes.append((col_name, 'STRING'))
             else:
-                attr_type = "STRING"
+                attributes.append((col_name, [str(v) for v in unique_vals]))
 
-        arff_str += f"@ATTRIBUTE {col} {attr_type}\n"
-
-    arff_str += "\n@DATA\n"
-
-    # --- Datos ---
+    # Limpieza y conversión segura de datos
+    data = []
     for _, row in df.iterrows():
-        values = []
+        clean_row = []
         for val in row:
-            if pd.isna(val) or (isinstance(val, (float, int)) and not np.isfinite(val)):
-                values.append("?")  # valor faltante
-            elif isinstance(val, str):
-                safe_val = val.replace('"', "'").replace(',', '').strip()
-                values.append(f'"{safe_val}"')
+            if pd.isna(val):
+                clean_row.append(None)
+            elif isinstance(val, (int, float, np.integer, np.floating)):
+                clean_row.append(float(val))
             else:
-                values.append(str(val))
-        arff_str += ",".join(values) + "\n"
+                clean_row.append(str(val))
+        data.append(clean_row)
 
-    return arff_str
+    arff_data = {
+        'description': f'{relation_name} dataset dividido por Dataset Divider',
+        'relation': relation_name,
+        'attributes': attributes,
+        'data': data
+    }
+
+    return arff.dumps(arff_data)
 
 
-# =============================
-# ℹ️ Información del dataset
-# =============================
+# ─────────────────────────────────────────────
+# INFORMACIÓN DEL DATASET
+# ─────────────────────────────────────────────
 def get_dataset_info(df):
-    """Obtiene información básica del dataset"""
-    info = {
+    """Devuelve estadísticas básicas del dataset."""
+    return {
         'rows': len(df),
         'columns': len(df.columns),
         'column_names': list(df.columns),
         'data_types': df.dtypes.astype(str).to_dict(),
         'missing_values': df.isnull().sum().to_dict(),
-        'memory_usage': df.memory_usage(deep=True).sum() // 1024
+        'memory_usage_kb': int(df.memory_usage(deep=True).sum() / 1024),
     }
-    return info
 
 
-# =============================
-# 🧩 Tipos de columnas
-# =============================
+# ─────────────────────────────────────────────
+# TIPOS DE COLUMNAS
+# ─────────────────────────────────────────────
 def get_column_types(df):
-    """Obtiene información sobre los tipos de columnas"""
+    """Identifica columnas numéricas y categóricas."""
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
 
     return {
         'numeric': numeric_cols,
@@ -146,15 +134,15 @@ def get_column_types(df):
     }
 
 
-# =============================
-# 🎯 Columna para estratificar
-# =============================
+# ─────────────────────────────────────────────
+# DETECCIÓN AUTOMÁTICA DE COLUMNA PARA ESTRATIFICAR
+# ─────────────────────────────────────────────
 def find_stratify_column(df):
     """
-    Encuentra automáticamente una columna adecuada para estratificación.
-    Prefiere columnas llamadas 'class', 'label', 'target', etc.
+    Intenta encontrar una columna adecuada para estratificación.
+    Busca primero entre las categóricas y luego entre las numéricas discretas.
     """
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
+    categorical_cols = df.select_dtypes(include=['object']).columns
 
     for col in categorical_cols:
         unique_count = df[col].nunique()
@@ -164,6 +152,7 @@ def find_stratify_column(df):
                 return col
             return col
 
+    # Si no encuentra categórica, intenta con numéricas discretas
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     for col in numeric_cols:
         unique_count = df[col].nunique()
