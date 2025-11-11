@@ -9,6 +9,9 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.railway.app']
 
+# 🔹 Línea clave para evitar el error 403 CSRF en Railway
+CSRF_TRUSTED_ORIGINS = ['https://*.railway.app']
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
