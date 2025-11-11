@@ -1,187 +1,134 @@
-import os
 import pandas as pd
 import numpy as np
-import arff
 from sklearn.model_selection import train_test_split
+from django.core.files.base import ContentFile
+import arff
 
-
-# ─────────────────────────────────────────────
-# VALIDACIÓN DE ARCHIVOS
-# ─────────────────────────────────────────────
-def validate_file_extension(filename: str) -> bool:
-    """Valida que el archivo tenga extensión .arff"""
+def validate_file_extension(filename):
+    """Valida que el archivo sea .arff"""
     return filename.lower().endswith('.arff')
 
 
-# ─────────────────────────────────────────────
-# LECTURA DEL DATASET ARFF
-# ─────────────────────────────────────────────
 def read_arff_dataset(file):
-    """
-    Lee un archivo ARFF y lo convierte a DataFrame de pandas.
-    Acepta archivos subidos desde un formulario de Django (InMemoryUploadedFile).
-    """
+    """Lee un archivo ARFF y lo convierte a DataFrame de pandas"""
     try:
-        file.seek(0)
-
-        # Leer solo hasta 20 MB para evitar sobrecarga en Railway
-        content = file.read(20 * 1024 * 1024).decode('utf-8', errors='ignore')
-
-        if '@data' not in content.lower() or '@relation' not in content.lower():
-            raise ValueError("El archivo no tiene formato ARFF válido o está corrupto.")
-
+        content = file.read().decode('utf-8')
         dataset = arff.loads(content)
-        attributes = [attr[0] for attr in dataset.get('attributes', [])]
-        data = dataset.get('data', [])
+        attributes = [attr[0] for attr in dataset['attributes']]
+        df = pd.DataFrame(dataset['data'], columns=attributes)
 
-        if not attributes or not data:
-            raise ValueError("El archivo ARFF no contiene datos válidos o está vacío.")
+        # Limpieza: elimina columnas duplicadas y asegura tipos válidos
+        df = df.loc[:, ~df.columns.duplicated()]
+        df = df.applymap(lambda x: str(x).strip() if isinstance(x, str) else x)
 
-        df = pd.DataFrame(data, columns=attributes)
         return df
-
-    except UnicodeDecodeError:
-        raise ValueError("El archivo contiene caracteres no válidos o no es UTF-8.")
     except Exception as e:
         raise ValueError(f"Error al leer el archivo ARFF: {str(e)}")
 
 
-# ─────────────────────────────────────────────
-# DIVISIÓN DEL DATASET
-# ─────────────────────────────────────────────
 def train_val_test_split(df, rstate=42, shuffle=True, stratify=None):
-    """
-    Divide el dataset en train (60%), validation (20%) y test (20%).
-    Si 'stratify' es una columna válida, se realiza muestreo estratificado.
-    """
-    try:
-        strat = df[stratify] if stratify and stratify in df.columns else None
+    """Divide el dataset en train (60%), validation (20%) y test (20%)"""
+    strat = df[stratify] if stratify else None 
 
-        train_set, temp_set = train_test_split(
-            df, test_size=0.4, random_state=rstate, shuffle=shuffle, stratify=strat
-        )
-
-        strat_temp = temp_set[stratify] if stratify and stratify in temp_set.columns else None
-
-        val_set, test_set = train_test_split(
-            temp_set, test_size=0.5, random_state=rstate, shuffle=shuffle, stratify=strat_temp
-        )
-
-        return train_set, val_set, test_set
-
-    except ValueError as e:
-        raise ValueError(f"Error al dividir el dataset: {str(e)}")
-    except Exception as e:
-        raise ValueError(f"Error inesperado en la división del dataset: {str(e)}")
+    train_set, test_set = train_test_split(
+        df, test_size=0.4, random_state=rstate, shuffle=shuffle, stratify=strat)
+    
+    strat = test_set[stratify] if stratify else None 
+    val_set, test_set = train_test_split(
+        test_set, test_size=0.5, random_state=rstate, shuffle=shuffle, stratify=strat)
+    
+    return train_set, val_set, test_set
 
 
-# ─────────────────────────────────────────────
-# CONVERSIÓN A ARFF
-# ─────────────────────────────────────────────
 def convert_to_arff(df, relation_name="dataset"):
-    """Convierte un DataFrame a formato ARFF válido."""
-    attributes = []
+    """Convierte un DataFrame a formato ARFF seguro para escritura"""
+    try:
+        df = df.copy()
 
-    for col_name, dtype in df.dtypes.items():
-        # Detectar tipo de atributo
-        if np.issubdtype(dtype, np.number):
-            attributes.append((col_name, 'NUMERIC'))
-        else:
-            unique_vals = df[col_name].dropna().unique().astype(str)
-            if len(unique_vals) > 30:
-                attributes.append((col_name, 'STRING'))
+        # Limpieza y conversión de tipos
+        df = df.replace({np.nan: None})
+        df = df.convert_dtypes()
+        
+        # Construir atributos ARFF
+        attributes = []
+        for col_name, dtype in df.dtypes.items():
+            if np.issubdtype(dtype, np.number):
+                attributes.append((col_name, 'NUMERIC'))
             else:
-                attributes.append((col_name, [str(v) for v in unique_vals]))
+                unique_vals = df[col_name].dropna().unique().tolist()
+                # Limita valores para evitar overflow de ARFF
+                if len(unique_vals) > 30:
+                    attributes.append((col_name, 'STRING'))
+                else:
+                    attributes.append((col_name, [str(x) for x in unique_vals]))
 
-    # Limpiar datos para formato ARFF
-    data = []
-    for _, row in df.iterrows():
-        clean_row = []
-        for val in row:
-            if pd.isna(val):
-                clean_row.append(None)
-            elif isinstance(val, (int, float, np.integer, np.floating)):
-                clean_row.append(float(val))
-            else:
-                val_str = str(val).replace('\n', ' ').replace('\r', ' ')
-                clean_row.append(val_str)
-        data.append(clean_row)
+        # Convertir datos fila por fila
+        data = []
+        for row in df.itertuples(index=False, name=None):
+            clean_row = []
+            for val in row:
+                if val is None:
+                    clean_row.append(None)
+                elif isinstance(val, (int, float)):
+                    clean_row.append(float(val))
+                else:
+                    clean_row.append(str(val))
+            data.append(clean_row)
 
-    # Estructura ARFF
-    arff_data = {
-        'description': f'{relation_name} generado por Dataset Divider',
-        'relation': relation_name,
-        'attributes': attributes,
-        'data': data
+        arff_data = {
+            'description': f'{relation_name} dataset divided by Dataset Divider',
+            'relation': relation_name,
+            'attributes': attributes,
+            'data': data
+        }
+
+        return arff.dumps(arff_data)
+    
+    except Exception as e:
+        raise ValueError(f"Error al convertir DataFrame a ARFF: {str(e)}")
+
+
+def get_dataset_info(df):
+    """Obtiene información básica del dataset"""
+    info = {
+        'rows': len(df),
+        'columns': len(df.columns),
+        'column_names': list(df.columns),
+        'data_types': df.dtypes.astype(str).to_dict(),
+        'missing_values': df.isnull().sum().to_dict(),
+        'memory_usage_kb': int(df.memory_usage(deep=True).sum() / 1024)
+    }
+    return info
+
+
+def get_column_types(df):
+    """Obtiene información sobre los tipos de columnas"""
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
+    
+    return {
+        'numeric': numeric_cols,
+        'categorical': categorical_cols,
+        'all_columns': list(df.columns)
     }
 
-    try:
-        return arff.dumps(arff_data)
-    except Exception as e:
-        raise ValueError(f"Error al convertir a formato ARFF: {str(e)}")
 
-
-# ─────────────────────────────────────────────
-# INFORMACIÓN DEL DATASET
-# ─────────────────────────────────────────────
-def get_dataset_info(df):
-    """Devuelve estadísticas básicas del dataset."""
-    try:
-        return {
-            'rows': len(df),
-            'columns': len(df.columns),
-            'column_names': list(df.columns),
-            'data_types': df.dtypes.astype(str).to_dict(),
-            'missing_values': int(df.isnull().sum().sum()),
-            'memory_usage_kb': int(df.memory_usage(deep=True).sum() / 1024),
-        }
-    except Exception as e:
-        raise ValueError(f"Error al obtener información del dataset: {str(e)}")
-
-
-# ─────────────────────────────────────────────
-# TIPOS DE COLUMNAS
-# ─────────────────────────────────────────────
-def get_column_types(df):
-    """Identifica columnas numéricas y categóricas."""
-    try:
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        categorical_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
-
-        return {
-            'numeric': numeric_cols,
-            'categorical': categorical_cols,
-            'all_columns': list(df.columns)
-        }
-    except Exception as e:
-        raise ValueError(f"Error al clasificar columnas: {str(e)}")
-
-
-# ─────────────────────────────────────────────
-# DETECCIÓN AUTOMÁTICA DE COLUMNA PARA ESTRATIFICAR
-# ─────────────────────────────────────────────
 def find_stratify_column(df):
-    """
-    Intenta encontrar una columna adecuada para estratificación.
-    Busca primero entre las categóricas y luego entre las numéricas discretas.
-    """
-    try:
-        categorical_cols = df.select_dtypes(include=['object']).columns
-        for col in categorical_cols:
-            unique_count = df[col].nunique()
-            if 2 <= unique_count <= 10:
-                col_lower = col.lower()
-                if any(keyword in col_lower for keyword in ['class', 'target', 'label', 'type', 'category']):
-                    return col
-                return col
+    """Encuentra automáticamente una columna buena para estratificar"""
+    categorical_cols = df.select_dtypes(include=['object', 'string']).columns
 
-        # Si no encuentra categórica, intenta con numéricas discretas
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        for col in numeric_cols:
-            unique_count = df[col].nunique()
-            if 2 <= unique_count <= 10:
+    for col in categorical_cols:
+        unique_count = df[col].nunique()
+        if 2 <= unique_count <= 10:
+            col_lower = col.lower()
+            if any(keyword in col_lower for keyword in ['class', 'target', 'label', 'type', 'category']):
                 return col
+            return col
 
-        return None
-    except Exception:
-        return None
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        unique_count = df[col].nunique()
+        if 2 <= unique_count <= 10:
+            return col
+
+    return None
