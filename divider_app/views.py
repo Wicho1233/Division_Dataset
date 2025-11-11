@@ -1,8 +1,10 @@
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse
-import os
 from django.contrib import messages
 from django.core.files.base import ContentFile
+from django.core.exceptions import ValidationError
+import os
+
 from .forms import DatasetUploadForm
 from .models import DatasetDivision
 from .utils import (
@@ -35,8 +37,8 @@ def upload_dataset(request):
             dataset_file = request.FILES['dataset_file']
 
             # --- Validaciones ---
-            if dataset_file.size > 50 * 1024 * 1024:
-                messages.error(request, 'El archivo es demasiado grande (máx. 50MB).')
+            if dataset_file.size > 50 * 1024 * 1024:  # 50 MB
+                messages.error(request, 'El archivo es demasiado grande (máx. 50 MB).')
                 return render(request, 'upload.html', {'form': form})
 
             if not validate_file_extension(dataset_file.name):
@@ -44,7 +46,12 @@ def upload_dataset(request):
                 return render(request, 'upload.html', {'form': form})
 
             # --- Lectura del archivo ---
-            df = read_arff_dataset(dataset_file)
+            try:
+                df = read_arff_dataset(dataset_file)
+            except ValidationError as ve:
+                messages.error(request, f'Error de validación: {ve}')
+                return render(request, 'upload.html', {'form': form})
+
             if df.empty:
                 messages.error(request, 'El archivo ARFF no contiene datos válidos.')
                 return render(request, 'upload.html', {'form': form})
@@ -58,11 +65,11 @@ def upload_dataset(request):
                     df, rstate=42, shuffle=True, stratify=stratify_column
                 )
             except ValueError as ve:
-                # Error común: clase con un solo ejemplo
+                # Si hay clases con muy pocos ejemplos
                 if "least populated class" in str(ve):
                     messages.warning(
                         request,
-                        "Advertencia: algunas clases tienen un solo ejemplo. "
+                        "Algunas clases tienen muy pocos ejemplos. "
                         "La división se realizó sin estratificación."
                     )
                     train_set, val_set, test_set = train_val_test_split(
@@ -80,7 +87,7 @@ def upload_dataset(request):
             val_filename = f"val_{base_name}.arff"
             test_filename = f"test_{base_name}.arff"
 
-            # --- Convertir y guardar archivos ---
+            # --- Convertir y guardar archivos ARFF ---
             train_arff = convert_to_arff(train_set, f"train_{base_name}")
             val_arff = convert_to_arff(val_set, f"val_{base_name}")
             test_arff = convert_to_arff(test_set, f"test_{base_name}")
@@ -90,7 +97,7 @@ def upload_dataset(request):
             division.test_set.save(test_filename, ContentFile(test_arff.encode('utf-8')))
             division.save()
 
-            # --- Preparar datos para resultados ---
+            # --- Datos para la vista de resultados ---
             column_info = get_column_types(df)
             context = {
                 'division': division,
@@ -121,7 +128,6 @@ def upload_dataset(request):
 
 def download_set(request, division_id, set_type):
     """Permite descargar uno de los conjuntos (train, val, test)."""
-    from django.shortcuts import get_object_or_404
     division = get_object_or_404(DatasetDivision, id=division_id)
 
     file_map = {
@@ -135,6 +141,11 @@ def download_set(request, division_id, set_type):
         return redirect('home')
 
     file, label = file_map[set_type]
+
+    # Mover el puntero al inicio antes de leer
+    file.open('rb')
     response = HttpResponse(file.read(), content_type='text/plain')
     response['Content-Disposition'] = f'attachment; filename="{label}_set_{division_id}.arff"'
+    file.close()
+
     return response
