@@ -1,0 +1,66 @@
+# --- Archivos del entorno virtual ---
+venv/
+.env/
+.venv/
+opt/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Archivos de configuración locales ---
+*.sqlite3
+.env.local
+.env.development
+.env.production
+.env.*
+*.log
+*.pot
+
+# --- Archivos temporales y de caché ---
+*.pid
+*.seed
+*.bak
+*.swp
+*.tmp
+*.orig
+*.DS_Store
+Thumbs.db
+*.pyc
+__pycache__/
+.idea/
+.vscode/
+.cache/
+.mypy_cache/
+pytest_cache/
+coverage.xml
+htmlcov/
+
+# --- Archivos de compilación ---
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Archivos estáticos generados ---
+staticfiles/
+static/
+media/
+node_modules/
+
+# --- Archivos propios de Railway ---
+# (Railway crea su propio entorno virtual en /opt/venv)
+opt/venv/
+.nixpacks/
+.dockerignore
+Dockerfile
+*.tar
+*.lock
+
+# --- Archivos de Jupyter (si usas notebooks) ---
+.ipynb_checkpoints/
+*.ipynb
+
+# --- Archivos del sistema ---
+*.swo
+*.swp
+*~
