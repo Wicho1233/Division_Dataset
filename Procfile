@@ -1,1 +1,1 @@
-web: gunicorn dataset_divider.wsgi --bind 0.0.0.0:$PORT --timeout 120 --log-file -
+web: python manage.py collectstatic --noinput && python manage.py migrate && gunicorn dataset_divider.wsgi

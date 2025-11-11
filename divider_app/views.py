@@ -1,151 +1,80 @@
-from django.shortcuts import render, redirect, get_object_or_404
+import io
+import zipfile
+from django.shortcuts import render
 from django.http import HttpResponse
 from django.contrib import messages
-from django.core.files.base import ContentFile
-from django.core.exceptions import ValidationError
-import os
 
-from .forms import DatasetUploadForm
-from .models import DatasetDivision
 from .utils import (
-    read_arff_dataset,
-    train_val_test_split,
     validate_file_extension,
+    read_arff_dataset,
     get_dataset_info,
     get_column_types,
-    convert_to_arff,
-    find_stratify_column
+    find_stratify_column,
+    train_val_test_split,
+    convert_to_arff
 )
 
-
-def home(request):
-    """Página principal para subir el dataset."""
-    form = DatasetUploadForm()
-    return render(request, 'upload.html', {'form': form})
+def index(request):
+    """Página principal."""
+    return render(request, 'divider_app/index.html')
 
 
 def upload_dataset(request):
-    """Procesa la carga y división del dataset ARFF."""
+    """Sube un archivo ARFF, lo divide y permite descargar los subconjuntos."""
     if request.method == 'POST':
-        form = DatasetUploadForm(request.POST, request.FILES)
+        uploaded_file = request.FILES.get('dataset')
 
-        if not form.is_valid():
-            messages.error(request, 'Por favor selecciona un archivo ARFF válido.')
-            return render(request, 'upload.html', {'form': form})
+        # Validación de extensión
+        if not uploaded_file or not validate_file_extension(uploaded_file.name):
+            messages.error(request, "Por favor, sube un archivo con extensión .arff válida.")
+            return render(request, 'divider_app/index.html')
 
         try:
-            dataset_file = request.FILES['dataset_file']
+            # Leer dataset
+            df = read_arff_dataset(uploaded_file)
+            base_name = uploaded_file.name.replace('.arff', '')
 
-            # --- Validaciones ---
-            if dataset_file.size > 50 * 1024 * 1024:  # 50 MB
-                messages.error(request, 'El archivo es demasiado grande (máx. 50 MB).')
-                return render(request, 'upload.html', {'form': form})
+            # Obtener información básica del dataset
+            dataset_info = get_dataset_info(df)
+            col_types = get_column_types(df)
+            stratify_col = find_stratify_column(df)
 
-            if not validate_file_extension(dataset_file.name):
-                messages.error(request, 'Solo se aceptan archivos con extensión .arff.')
-                return render(request, 'upload.html', {'form': form})
+            # Dividir dataset
+            train_set, val_set, test_set = train_val_test_split(
+                df, stratify=stratify_col
+            )
 
-            # --- Lectura del archivo ---
-            try:
-                df = read_arff_dataset(dataset_file)
-            except ValidationError as ve:
-                messages.error(request, f'Error de validación: {ve}')
-                return render(request, 'upload.html', {'form': form})
-
-            if df.empty:
-                messages.error(request, 'El archivo ARFF no contiene datos válidos.')
-                return render(request, 'upload.html', {'form': form})
-
-            # --- Determinar columna de estratificación ---
-            stratify_column = find_stratify_column(df)
-
-            # --- División del dataset ---
-            try:
-                train_set, val_set, test_set = train_val_test_split(
-                    df, rstate=42, shuffle=True, stratify=stratify_column
-                )
-            except ValueError as ve:
-                # Si hay clases con muy pocos ejemplos
-                if "least populated class" in str(ve):
-                    messages.warning(
-                        request,
-                        "Algunas clases tienen muy pocos ejemplos. "
-                        "La división se realizó sin estratificación."
-                    )
-                    train_set, val_set, test_set = train_val_test_split(
-                        df, rstate=42, shuffle=True, stratify=None
-                    )
-                else:
-                    raise ve
-
-            # --- Guardar registro en BD ---
-            division = DatasetDivision(train_size=0.6, val_size=0.2, test_size=0.2)
-            division.original_file.save(dataset_file.name, dataset_file)
-
-            base_name = os.path.splitext(dataset_file.name)[0]
-            train_filename = f"train_{base_name}.arff"
-            val_filename = f"val_{base_name}.arff"
-            test_filename = f"test_{base_name}.arff"
-
-            # --- Convertir y guardar archivos ARFF ---
+            # Convertir a formato ARFF
             train_arff = convert_to_arff(train_set, f"train_{base_name}")
             val_arff = convert_to_arff(val_set, f"val_{base_name}")
             test_arff = convert_to_arff(test_set, f"test_{base_name}")
 
-            division.train_set.save(train_filename, ContentFile(train_arff.encode('utf-8')))
-            division.val_set.save(val_filename, ContentFile(val_arff.encode('utf-8')))
-            division.test_set.save(test_filename, ContentFile(test_arff.encode('utf-8')))
-            division.save()
+            # Crear archivo ZIP en memoria
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                zip_file.writestr(f"{base_name}_train.arff", train_arff)
+                zip_file.writestr(f"{base_name}_val.arff", val_arff)
+                zip_file.writestr(f"{base_name}_test.arff", test_arff)
 
-            # --- Datos para la vista de resultados ---
-            column_info = get_column_types(df)
+            zip_buffer.seek(0)
+
+            response = HttpResponse(zip_buffer, content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename={base_name}_split_datasets.zip'
+
+            # Mostrar información del dataset en la vista
             context = {
-                'division': division,
-                'train_rows': len(train_set),
-                'val_rows': len(val_set),
-                'test_rows': len(test_set),
-                'total_rows': len(df),
-                'dataset_info': get_dataset_info(df),
-                'column_info': column_info,
-                'train_percentage': (len(train_set) / len(df)) * 100,
-                'val_percentage': (len(val_set) / len(df)) * 100,
-                'test_percentage': (len(test_set) / len(df)) * 100,
-                'used_stratify': stratify_column if stratify_column else 'Ninguna (muestreo aleatorio)',
-                'split_ratio': '60% Train - 20% Validation - 20% Test'
+                'dataset_info': dataset_info,
+                'col_types': col_types,
+                'stratify_column': stratify_col or 'Ninguna',
+                'file_name': uploaded_file.name,
+                'success': True
             }
 
-            messages.success(request, '¡Dataset ARFF dividido exitosamente!')
-            return render(request, 'results.html', context)
+            return response
 
         except Exception as e:
-            messages.error(request, f'Error al procesar el dataset: {str(e)}')
-            return render(request, 'upload.html', {'form': form})
+            messages.error(request, f"Ocurrió un error procesando el archivo: {str(e)}")
+            return render(request, 'divider_app/index.html')
 
-    # Si no es POST, mostrar el formulario vacío
-    form = DatasetUploadForm()
-    return render(request, 'upload.html', {'form': form})
-
-
-def download_set(request, division_id, set_type):
-    """Permite descargar uno de los conjuntos (train, val, test)."""
-    division = get_object_or_404(DatasetDivision, id=division_id)
-
-    file_map = {
-        'train': (division.train_set, 'train'),
-        'val': (division.val_set, 'val'),
-        'test': (division.test_set, 'test'),
-    }
-
-    if set_type not in file_map:
-        messages.error(request, 'Tipo de conjunto inválido.')
-        return redirect('home')
-
-    file, label = file_map[set_type]
-
-    # Mover el puntero al inicio antes de leer
-    file.open('rb')
-    response = HttpResponse(file.read(), content_type='text/plain')
-    response['Content-Disposition'] = f'attachment; filename="{label}_set_{division_id}.arff"'
-    file.close()
-
-    return response
+    # Si no es POST, muestra formulario vacío
+    return render(request, 'divider_app/index.html')
