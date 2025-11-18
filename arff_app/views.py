@@ -157,6 +157,10 @@ def split_dataset(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# Añadir esta importación al inicio del archivo
+from django.conf import settings
+
+# Y actualizar la función download_split_file para producción
 @api_view(['GET'])
 def download_split_file(request, split_id, file_type):
     """Endpoint para descargar archivos de splits"""
@@ -182,6 +186,15 @@ def download_split_file(request, split_id, file_type):
             'message': f'Archivo {file_type} no disponible'
         }, status=status.HTTP_404_NOT_FOUND)
     
+    # En producción, redirigir a la URL de S3
+    if not settings.DEBUG and hasattr(file, 'url'):
+        return Response({
+            'status': 'success',
+            'download_url': file.url,
+            'filename': file.name
+        }, status=status.HTTP_200_OK)
+    
+    # En desarrollo, servir el archivo directamente
     response = FileResponse(file.open(), as_attachment=True, filename=file.name)
     return response
 

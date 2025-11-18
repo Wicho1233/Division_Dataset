@@ -10,3 +10,7 @@ matplotlib
 seaborn
 Pillow
 django-filter
+gunicorn
+whitenoise
+psycopg2-binary
+dj-database-url
