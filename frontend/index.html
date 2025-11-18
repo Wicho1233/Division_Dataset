@@ -3,25 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Division del DataSet</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>NSL-KDD Dataset Manager</title>
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <div class="container">
         <header class="header">
-            <h1></h1>
-            <p>Gestiona y divide datasets</p>
+            <h1>NSL-KDD Dataset Manager</h1>
+            <p>Gestiona y divide datasets NSL-KDD</p>
         </header>
 
         <main class="main-content">
-            <!-- Sección de carga de datasets -->
             <section class="section" id="upload-section">
                 <h2>Cargar Dataset</h2>
                 <div class="upload-area" id="upload-area">
                     <input type="file" id="file-input" accept=".arff" style="display: none;">
                     <div class="upload-placeholder" id="upload-placeholder">
                         <p>Haz clic aquí o arrastra un archivo .arff</p>
-                        <small>Solo se permiten archivos ARFF</small>
+                        <small>Solo se permiten archivos ARFF (máximo 10MB)</small>
                     </div>
                     <div class="file-info" id="file-info" style="display: none;">
                         <p id="file-name"></p>
@@ -32,7 +31,6 @@
                 <button class="btn btn-primary" onclick="uploadDataset()" id="upload-btn" disabled>Subir Dataset</button>
             </section>
 
-            <!-- Sección de datasets disponibles -->
             <section class="section" id="datasets-section" style="display: none;">
                 <h2>Datasets Disponibles</h2>
                 <div class="table-container">
@@ -52,7 +50,6 @@
                 </div>
             </section>
 
-            <!-- Sección de división de dataset -->
             <section class="section" id="split-section" style="display: none;">
                 <h2>Dividir Dataset</h2>
                 <div class="form-group">
@@ -91,7 +88,6 @@
                 <button class="btn btn-primary" onclick="splitDataset()" id="split-btn" disabled>Dividir Dataset</button>
             </section>
 
-            <!-- Sección de divisiones guardadas -->
             <section class="section" id="splits-section" style="display: none;">
                 <h2>Divisiones Guardadas</h2>
                 <div class="table-container">
@@ -114,16 +110,13 @@
                 </div>
             </section>
 
-            <!-- Sección de gráficas -->
             <section class="section" id="plots-section" style="display: none;">
                 <h2>Gráficas</h2>
                 <div class="plots-container" id="plots-container">
-                    <!-- Las gráficas se cargarán aquí dinámicamente -->
                 </div>
             </section>
         </main>
 
-        <!-- Modal para información de dataset -->
         <div class="modal" id="dataset-info-modal">
             <div class="modal-content">
                 <span class="close" onclick="closeModal('dataset-info-modal')">&times;</span>
@@ -132,16 +125,14 @@
             </div>
         </div>
 
-        <!-- Loading overlay -->
         <div class="loading-overlay" id="loading-overlay" style="display: none;">
             <div class="loading-spinner"></div>
             <p>Procesando...</p>
         </div>
 
-        <!-- Notificaciones -->
         <div class="notification" id="notification"></div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="/static/script.js"></script>
 </body>
 </html>

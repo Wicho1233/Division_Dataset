@@ -1,5 +1,5 @@
 // Configuración
-const API_BASE_URL = 'https://division-dataset-3.onrender.com/api';
+const API_BASE_URL = '/api';
 
 // Estado global
 let currentDatasets = [];
@@ -7,6 +7,7 @@ let currentSplits = [];
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('NSL-KDD Dataset Manager iniciado');
     loadDatasets();
     loadSplits();
     setupEventListeners();
@@ -14,7 +15,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Configuración de event listeners
 function setupEventListeners() {
-    // Drag and drop para upload
     const uploadArea = document.getElementById('upload-area');
     const fileInput = document.getElementById('file-input');
     
@@ -44,7 +44,6 @@ function setupEventListeners() {
         }
     });
     
-    // Cambio en selección de dataset para split
     document.getElementById('split-dataset-select').addEventListener('change', function() {
         const datasetId = this.value;
         if (datasetId) {
@@ -56,10 +55,15 @@ function setupEventListeners() {
     });
 }
 
-// Manejo de selección de archivo
+// Manejo de archivos
 function handleFileSelect(file) {
     if (!file.name.toLowerCase().endsWith('.arff')) {
         showNotification('Solo se permiten archivos .arff', 'error');
+        return;
+    }
+    
+    if (file.size > 10 * 1024 * 1024) {
+        showNotification('El archivo es demasiado grande. Máximo 10MB.', 'error');
         return;
     }
     
@@ -68,7 +72,7 @@ function handleFileSelect(file) {
     const fileName = document.getElementById('file-name');
     const uploadBtn = document.getElementById('upload-btn');
     
-    fileName.textContent = file.name;
+    fileName.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
     uploadPlaceholder.style.display = 'none';
     fileInfo.style.display = 'flex';
     uploadBtn.disabled = false;
@@ -79,11 +83,13 @@ function clearFile() {
     const uploadPlaceholder = document.getElementById('upload-placeholder');
     const fileInfo = document.getElementById('file-info');
     const uploadBtn = document.getElementById('upload-btn');
+    const datasetNameInput = document.getElementById('dataset-name');
     
     fileInput.value = '';
     uploadPlaceholder.style.display = 'block';
     fileInfo.style.display = 'none';
     uploadBtn.disabled = true;
+    datasetNameInput.value = '';
 }
 
 // Funciones de API
@@ -100,14 +106,12 @@ async function apiCall(endpoint, options = {}) {
             ...options
         });
         
-        // Verificar si la respuesta es JSON
         const contentType = response.headers.get('content-type');
         let data;
         
         if (contentType && contentType.includes('application/json')) {
             data = await response.json();
         } else {
-            // Si no es JSON, crear un objeto con el status
             data = {
                 status: response.ok ? 'success' : 'error',
                 message: `HTTP ${response.status}: ${response.statusText}`
@@ -115,13 +119,17 @@ async function apiCall(endpoint, options = {}) {
         }
         
         if (!response.ok) {
-            throw new Error(data.message || `Error ${response.status}: ${response.statusText}`);
+            throw new Error(data.message || data.detail || `Error ${response.status}: ${response.statusText}`);
         }
         
         return data;
     } catch (error) {
         console.error('API Error:', error);
-        showNotification(error.message, 'error');
+        let userMessage = error.message;
+        if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+            userMessage = 'No se pudo conectar con el servidor. Verifica tu conexión.';
+        }
+        showNotification(userMessage, 'error');
         throw error;
     } finally {
         showLoading(false);
@@ -138,9 +146,10 @@ async function uploadDataset() {
         return;
     }
     
+    const file = fileInput.files[0];
     const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
-    formData.append('name', datasetNameInput.value || fileInput.files[0].name);
+    formData.append('file', file);
+    formData.append('name', datasetNameInput.value || file.name.replace('.arff', ''));
     
     try {
         showLoading(true);
@@ -153,18 +162,15 @@ async function uploadDataset() {
         try {
             data = await response.json();
         } catch (e) {
-            data = {
-                message: `Error ${response.status}: ${response.statusText}`
-            };
+            data = { message: `Error ${response.status}: ${response.statusText}` };
         }
         
         if (!response.ok) {
-            throw new Error(data.message || 'Error al subir el archivo');
+            throw new Error(data.message || data.detail || 'Error al subir el archivo');
         }
         
         showNotification('Dataset subido exitosamente', 'success');
         clearFile();
-        datasetNameInput.value = '';
         loadDatasets();
         
     } catch (error) {
@@ -181,12 +187,10 @@ async function loadDatasets() {
         renderDatasetsTable();
         updateSplitDatasetSelect();
         
-        // Mostrar/ocultar sección
         document.getElementById('datasets-section').style.display = 
             currentDatasets.length > 0 ? 'block' : 'none';
             
     } catch (error) {
-        console.error('Error loading datasets:', error);
         currentDatasets = [];
         renderDatasetsTable();
     }
@@ -221,35 +225,47 @@ async function showDatasetInfo(datasetId) {
         const modal = document.getElementById('dataset-info-modal');
         const content = document.getElementById('dataset-info-content');
         
-        let stratificationContent = '<p>No se pudieron cargar las columnas de estratificación</p>';
+        let basicInfo = '<p>Información no disponible</p>';
+        let stratificationContent = '<p>No se pudieron cargar las columnas</p>';
+        
+        if (data.info && data.info.basic_info) {
+            basicInfo = `
+                <div class="info-item">
+                    <span class="info-label">Filas:</span>
+                    <span class="info-value">${data.info.basic_info.shape?.[0] || 'N/A'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Columnas:</span>
+                    <span class="info-value">${data.info.basic_info.shape?.[1] || 'N/A'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Uso de memoria:</span>
+                    <span class="info-value">${data.info.basic_info.memory_usage ? (data.info.basic_info.memory_usage / 1024 / 1024).toFixed(2) + ' MB' : 'N/A'}</span>
+                </div>
+            `;
+        }
         
         if (data.stratification_columns) {
-            stratificationContent = Object.entries(data.stratification_columns).map(([col, info]) => `
-                <div class="info-item">
-                    <span class="info-label">${col}:</span>
-                    <span class="info-value">${info.unique_values || 'N/A'} valores únicos ${info.recommended ? '(Recomendada)' : ''}</span>
-                </div>
-            `).join('');
+            stratificationContent = Object.entries(data.stratification_columns)
+                .slice(0, 10)
+                .map(([col, info]) => `
+                    <div class="info-item">
+                        <span class="info-label">${col}:</span>
+                        <span class="info-value">${info.unique_values || 'N/A'} valores únicos ${info.recommended ? '✓' : ''}</span>
+                    </div>
+                `).join('');
+            
+            if (Object.keys(data.stratification_columns).length > 10) {
+                stratificationContent += `<div class="info-item"><em>... y ${Object.keys(data.stratification_columns).length - 10} columnas más</em></div>`;
+            }
         }
         
         content.innerHTML = `
             <div class="dataset-info">
                 <div class="info-section">
                     <h4>Información Básica</h4>
-                    <div class="info-item">
-                        <span class="info-label">Filas:</span>
-                        <span class="info-value">${data.info?.basic_info?.shape?.[0] || 'N/A'}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">Columnas:</span>
-                        <span class="info-value">${data.info?.basic_info?.shape?.[1] || 'N/A'}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">Uso de memoria:</span>
-                        <span class="info-value">${data.info?.basic_info?.memory_usage ? (data.info.basic_info.memory_usage / 1024 / 1024).toFixed(2) + ' MB' : 'N/A'}</span>
-                    </div>
+                    ${basicInfo}
                 </div>
-                
                 <div class="info-section">
                     <h4>Columnas para Estratificación</h4>
                     ${stratificationContent}
@@ -260,7 +276,6 @@ async function showDatasetInfo(datasetId) {
         modal.style.display = 'block';
         
     } catch (error) {
-        console.error('Error loading dataset info:', error);
         showNotification('Error al cargar la información del dataset', 'error');
     }
 }
@@ -276,6 +291,12 @@ async function splitDataset() {
     if (!datasetSelect.value) {
         showNotification('Selecciona un dataset primero', 'error');
         return;
+    }
+    
+    if (!stratifyColumn.value) {
+        if (!confirm('¿Continuar sin estratificación? Esto puede afectar la distribución de los datos.')) {
+            return;
+        }
     }
     
     const payload = {
@@ -295,6 +316,8 @@ async function splitDataset() {
         
         showNotification('Dataset dividido exitosamente', 'success');
         loadSplits();
+        stratifyColumn.value = '';
+        document.getElementById('split-btn').disabled = true;
         
     } catch (error) {
         console.error('Error splitting dataset:', error);
@@ -307,12 +330,10 @@ async function loadSplits() {
         currentSplits = data.splits || [];
         renderSplitsTable();
         
-        // Mostrar/ocultar sección
         document.getElementById('splits-section').style.display = 
             currentSplits.length > 0 ? 'block' : 'none';
             
     } catch (error) {
-        console.error('Error loading splits:', error);
         currentSplits = [];
         renderSplitsTable();
     }
@@ -336,20 +357,22 @@ function renderSplitsTable() {
             <td>${split.test_size || 'N/A'}</td>
             <td>${split.created_at ? new Date(split.created_at).toLocaleDateString() : 'N/A'}</td>
             <td>
-                <button class="btn btn-secondary btn-small" onclick="downloadSplitFile(${split.id}, 'train')">
-                    Train
-                </button>
-                <button class="btn btn-secondary btn-small" onclick="downloadSplitFile(${split.id}, 'validation')">
-                    Validation
-                </button>
-                <button class="btn btn-secondary btn-small" onclick="downloadSplitFile(${split.id}, 'test')">
-                    Test
-                </button>
-                ${split.distribution_plot_url || split.comparison_plot_url ? `
-                <button class="btn btn-secondary btn-small" onclick="loadPlots(${split.id})">
-                    Gráficas
-                </button>
-                ` : ''}
+                <div class="action-buttons">
+                    <button class="btn btn-secondary btn-small" onclick="downloadSplitFile(${split.id}, 'train')">
+                        Train
+                    </button>
+                    <button class="btn btn-secondary btn-small" onclick="downloadSplitFile(${split.id}, 'validation')">
+                        Validation
+                    </button>
+                    <button class="btn btn-secondary btn-small" onclick="downloadSplitFile(${split.id}, 'test')">
+                        Test
+                    </button>
+                    ${(split.distribution_plot_url || split.comparison_plot_url) ? `
+                    <button class="btn btn-secondary btn-small" onclick="loadPlots(${split.id})">
+                        Gráficas
+                    </button>
+                    ` : ''}
+                </div>
             </td>
         </tr>
     `).join('');
@@ -357,38 +380,19 @@ function renderSplitsTable() {
 
 async function downloadSplitFile(splitId, fileType) {
     try {
-        // Intentar obtener información primero
-        const splitInfo = await apiCall(`/splits/${splitId}/`);
-        
-        if (splitInfo.split && splitInfo.split[`${fileType}_file_url`]) {
-            // Si hay URL directa, usar esa
-            window.open(splitInfo.split[`${fileType}_file_url`], '_blank');
-            showNotification(`Descargando archivo ${fileType}`, 'success');
-            return;
-        }
-        
-        // Si no hay URL directa, intentar descarga directa
-        const response = await fetch(`${API_BASE_URL}/splits/${splitId}/download/${fileType}/`);
-        
-        if (!response.ok) {
-            throw new Error(`Error ${response.status}: ${response.statusText}`);
-        }
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
+        const downloadUrl = `${API_BASE_URL}/splits/${splitId}/download/${fileType}/`;
         const a = document.createElement('a');
-        a.href = url;
+        a.href = downloadUrl;
         a.download = `${fileType}_split.arff`;
+        a.target = '_blank';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
         
-        showNotification(`Descargando archivo ${fileType}`, 'success');
+        showNotification(`Iniciando descarga: ${fileType}`, 'success');
         
     } catch (error) {
-        console.error('Download error:', error);
-        showNotification('Error al descargar el archivo. El archivo puede no estar disponible.', 'error');
+        showNotification('Error al descargar el archivo', 'error');
     }
 }
 
@@ -397,10 +401,9 @@ function updateSplitDatasetSelect() {
     const select = document.getElementById('split-dataset-select');
     select.innerHTML = '<option value="">Selecciona un dataset</option>' +
         currentDatasets.map(dataset => 
-            `<option value="${dataset.id}">${dataset.name}</option>`
+            `<option value="${dataset.id}">${dataset.name} (${dataset.rows} filas, ${dataset.columns} columnas)</option>`
         ).join('');
     
-    // Mostrar/ocultar sección de split
     document.getElementById('split-section').style.display = 
         currentDatasets.length > 0 ? 'block' : 'none';
 }
@@ -410,23 +413,33 @@ async function loadStratificationColumns(datasetId) {
         const data = await apiCall(`/datasets/${datasetId}/info/`);
         const select = document.getElementById('stratify-column');
         
-        let options = '<option value="">Selecciona una columna</option>';
+        let options = '<option value="">Selecciona una columna (opcional)</option>';
         
         if (data.stratification_columns) {
             const recommendedColumns = Object.entries(data.stratification_columns)
                 .filter(([col, info]) => info.recommended)
                 .map(([col, info]) => col);
             
-            options += recommendedColumns.map(col => 
-                `<option value="${col}">${col}</option>`
-            ).join('') +
-            '<option value="">--- Todas las columnas ---</option>' +
-            Object.keys(data.stratification_columns)
-                .filter(col => !recommendedColumns.includes(col))
-                .map(col => `<option value="${col}">${col}</option>`)
-                .join('');
+            if (recommendedColumns.length > 0) {
+                options += '<optgroup label="Recomendadas">';
+                options += recommendedColumns.map(col => 
+                    `<option value="${col}">${col}</option>`
+                ).join('');
+                options += '</optgroup>';
+            }
+            
+            const otherColumns = Object.keys(data.stratification_columns)
+                .filter(col => !recommendedColumns.includes(col));
+            
+            if (otherColumns.length > 0) {
+                options += '<optgroup label="Otras columnas">';
+                options += otherColumns.map(col => 
+                    `<option value="${col}">${col}</option>`
+                ).join('');
+                options += '</optgroup>';
+            }
         } else {
-            options += '<option value="">No hay columnas disponibles</option>';
+            options += '<option value="">No hay columnas categóricas disponibles</option>';
         }
         
         select.innerHTML = options;
@@ -434,7 +447,6 @@ async function loadStratificationColumns(datasetId) {
         document.getElementById('split-btn').disabled = false;
         
     } catch (error) {
-        console.error('Error loading stratification columns:', error);
         const select = document.getElementById('stratify-column');
         select.innerHTML = '<option value="">Error al cargar columnas</option>';
         select.disabled = false;
@@ -451,14 +463,13 @@ async function loadPlots(splitId) {
         }
         
         const container = document.getElementById('plots-container');
-        
         let plotsHTML = '';
         
         if (split.distribution_plot_url) {
             plotsHTML += `
                 <div class="plot-item">
                     <h4>Distribución - ${split.stratify_column || 'Dataset'}</h4>
-                    <img src="${split.distribution_plot_url}" alt="Distribución" onerror="this.style.display='none'">
+                    <img src="${split.distribution_plot_url}" alt="Distribución">
                 </div>
             `;
         }
@@ -467,7 +478,7 @@ async function loadPlots(splitId) {
             plotsHTML += `
                 <div class="plot-item">
                     <h4>Comparación entre Splits</h4>
-                    <img src="${split.comparison_plot_url}" alt="Comparación" onerror="this.style.display='none'">
+                    <img src="${split.comparison_plot_url}" alt="Comparación">
                 </div>
             `;
         }
@@ -478,12 +489,9 @@ async function loadPlots(splitId) {
         
         container.innerHTML = plotsHTML;
         document.getElementById('plots-section').style.display = 'block';
-        
-        // Scroll a la sección de gráficas
         document.getElementById('plots-section').scrollIntoView({ behavior: 'smooth' });
         
     } catch (error) {
-        console.error('Error loading plots:', error);
         showNotification('Error al cargar las gráficas', 'error');
     }
 }
@@ -508,7 +516,6 @@ function closeModal(modalId) {
     document.getElementById(modalId).style.display = 'none';
 }
 
-// Cerrar modal al hacer clic fuera
 window.addEventListener('click', function(event) {
     const modals = document.getElementsByClassName('modal');
     for (let modal of modals) {
@@ -516,30 +523,4 @@ window.addEventListener('click', function(event) {
             modal.style.display = 'none';
         }
     }
-});
-
-// Función para probar la conexión con la API
-async function testConnection() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/datasets/`);
-        if (response.ok) {
-            console.log('Conexión con la API exitosa');
-            return true;
-        } else {
-            console.error('Error en la conexión con la API:', response.status);
-            return false;
-        }
-    } catch (error) {
-        console.error('Error de conexión:', error);
-        return false;
-    }
-}
-
-// Probar conexión al cargar la página
-document.addEventListener('DOMContentLoaded', function() {
-    testConnection().then(success => {
-        if (!success) {
-            showNotification('No se pudo conectar con el servidor. Verifica tu conexión.', 'error');
-        }
-    });
 });
