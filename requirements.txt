@@ -5,6 +5,7 @@ pandas
 scikit-learn
 liac-arff
 numpy
+decouple
 python-decouple
 matplotlib
 seaborn
