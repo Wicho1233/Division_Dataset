@@ -29,8 +29,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
-    'dataset_splitter',
     'storages',
+    'arff_app',  # Tu aplicación principal
 ]
 
 MIDDLEWARE = [
