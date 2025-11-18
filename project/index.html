@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NSL-KDD Dataset Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>NSL-KDD Dataset Manager</h1>
+            <p>Gestiona y divide datasets NSL-KDD</p>
+        </header>
+
+        <main class="main-content">
+            <!-- Sección de carga de datasets -->
+            <section class="section" id="upload-section">
+                <h2>Cargar Dataset</h2>
+                <div class="upload-area" id="upload-area">
+                    <input type="file" id="file-input" accept=".arff" style="display: none;">
+                    <div class="upload-placeholder" id="upload-placeholder">
+                        <p>Haz clic aquí o arrastra un archivo .arff</p>
+                        <small>Solo se permiten archivos ARFF</small>
+                    </div>
+                    <div class="file-info" id="file-info" style="display: none;">
+                        <p id="file-name"></p>
+                        <button class="btn btn-secondary" onclick="clearFile()">Eliminar</button>
+                    </div>
+                </div>
+                <input type="text" id="dataset-name" class="input" placeholder="Nombre del dataset (opcional)">
+                <button class="btn btn-primary" onclick="uploadDataset()" id="upload-btn" disabled>Subir Dataset</button>
+            </section>
+
+            <!-- Sección de datasets disponibles -->
+            <section class="section" id="datasets-section" style="display: none;">
+                <h2>Datasets Disponibles</h2>
+                <div class="table-container">
+                    <table class="table" id="datasets-table">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Filas</th>
+                                <th>Columnas</th>
+                                <th>Fecha</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="datasets-tbody">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Sección de división de dataset -->
+            <section class="section" id="split-section" style="display: none;">
+                <h2>Dividir Dataset</h2>
+                <div class="form-group">
+                    <label for="split-dataset-select">Seleccionar Dataset:</label>
+                    <select id="split-dataset-select" class="select">
+                        <option value="">Selecciona un dataset</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="stratify-column">Columna para Estratificación:</label>
+                    <select id="stratify-column" class="select" disabled>
+                        <option value="">Primero selecciona un dataset</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="random-state">Semilla Aleatoria:</label>
+                    <input type="number" id="random-state" class="input" value="42" min="0">
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="shuffle" checked>
+                        Mezclar datos antes de dividir
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="generate-plots" checked>
+                        Generar gráficas
+                    </label>
+                </div>
+
+                <button class="btn btn-primary" onclick="splitDataset()" id="split-btn" disabled>Dividir Dataset</button>
+            </section>
+
+            <!-- Sección de divisiones guardadas -->
+            <section class="section" id="splits-section" style="display: none;">
+                <h2>Divisiones Guardadas</h2>
+                <div class="table-container">
+                    <table class="table" id="splits-table">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Dataset</th>
+                                <th>Columna Estratificación</th>
+                                <th>Train</th>
+                                <th>Validation</th>
+                                <th>Test</th>
+                                <th>Fecha</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="splits-tbody">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Sección de gráficas -->
+            <section class="section" id="plots-section" style="display: none;">
+                <h2>Gráficas</h2>
+                <div class="plots-container" id="plots-container">
+                    <!-- Las gráficas se cargarán aquí dinámicamente -->
+                </div>
+            </section>
+        </main>
+
+        <!-- Modal para información de dataset -->
+        <div class="modal" id="dataset-info-modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeModal('dataset-info-modal')">&times;</span>
+                <h3>Información del Dataset</h3>
+                <div id="dataset-info-content"></div>
+            </div>
+        </div>
+
+        <!-- Loading overlay -->
+        <div class="loading-overlay" id="loading-overlay" style="display: none;">
+            <div class="loading-spinner"></div>
+            <p>Procesando...</p>
+        </div>
+
+        <!-- Notificaciones -->
+        <div class="notification" id="notification"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
